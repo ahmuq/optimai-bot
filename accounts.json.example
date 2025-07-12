@@ -1,18 +1,8 @@
 [
     {
-        "refreshToken": "your_token",
-        "nodeToken": []
+        "refreshToken": "your_refresh_token"
     },
     {
-        "refreshToken": "your_token",
-        "nodeToken": []
-    },
-    {
-        "refreshToken": "your_token",
-        "nodeToken": []
-    },
-    {
-        "refreshToken": "your_token",
-        "nodeToken": []
+        "refreshToken": "your_refresh_token"
     }
 ]

@@ -1,23 +1,19 @@
 import axios, { AxiosResponse } from "axios";
 import chalk from "chalk";
 import UserAgent from 'user-agents';
-import WebSocket from "ws";
 import { Generator } from "../utils/generator";
 import { logMessage } from "../utils/logger";
 import { ProxyManager } from "./proxy";
 const userAgent = new UserAgent();
-const BROWSERS = ["chrome", "firefox", "edge", "opera", "brave"];
 
 export class optimAi {
   private proxyManager: ProxyManager;
   private proxy: string | null;
   private account: any;
   private axiosConfig: any;
-  private ws: WebSocket | null = null;
   private currentNum: number;
   private token: string | null = null;
   private total: number;
-  private wsToken: string | null;
   private generator: Generator;
 
   constructor(account: any, proxy: string | null = null, currentNum: number, total: number) {
@@ -25,15 +21,19 @@ export class optimAi {
     this.proxy = proxy;
     this.currentNum = currentNum;
     this.total = total;
-    this.wsToken = null;
     this.proxyManager = new ProxyManager();
     this.generator = new Generator();
     this.axiosConfig = {
       ...(this.proxy && { httpsAgent: this.proxyManager.getProxyAgent(this.proxy, this.currentNum, this.total) }),
       headers: {
         "User-Agent": userAgent.toString(),
-        origin: "https://node.optimai.network",
-        Referer: "https://node.optimai.network"
+        "Accept": "*/*",
+        "Accept-Language": "id-ID,id;q=0.9,en-US;q=0.8,en;q=0.7",
+        "Origin": "chrome-extension://njlfcjdojmopagogfpjgcbnpmiknapnd",
+        "Sec-Fetch-Dest": "empty",
+        "Sec-Fetch-Mode": "cors",
+        "Sec-Fetch-Site": "none",
+        "Sec-Fetch-Storage-Access": "active"
       }
     };
   }
@@ -70,6 +70,27 @@ export class optimAi {
     }
   }
 
+  decodeResponseData(data: string): any {
+    try {
+      const decoded = Buffer.from(data, 'base64').toString('utf-8');
+      const filtered = decoded.split('').filter((char, index) => (index + 1) % 5 !== 0).join('');
+      const reversedStr = filtered.split('').reverse().join('');
+      const a = 7;
+
+      let result = '';
+      for (let i = 0; i < reversedStr.length; i += 2) {
+        const hexValue = reversedStr.substring(i, i + 2);
+        const charCode = parseInt(hexValue, 16) ^ (a + Math.floor(i / 2));
+        result += String.fromCharCode(charCode);
+      }
+
+      return JSON.parse(result);
+    } catch (error: any) {
+      logMessage(this.currentNum, this.total, `Error decoding response: ${error.message}`, "error");
+      return null;
+    }
+  }
+
   async getAccessToken() {
     logMessage(this.currentNum, this.total, "Getting access token...", "info");
     const payload = {
@@ -89,72 +110,103 @@ export class optimAi {
     }
   }
 
-  async registerNode(timezone: string, xclient: string, browserName: string) {
+  async registerNode() {
     logMessage(this.currentNum, this.total, "Registering node...", "info");
+    if (!this.token) {
+      await this.getAccessToken();
+    }
+
+
+    let registerPayload = this.account.registerPayload;
+    if (!registerPayload) {
+      const payloads = await this.generatePayloadsFromToken();
+      if (!payloads) {
+        logMessage(this.currentNum, this.total, "Failed to generate payloads", "error");
+        return false;
+      }
+      registerPayload = payloads.registerPayload;
+    }
+
     const headers = {
       Authorization: `Bearer ${this.token}`,
-      "X-Client-Authentication": xclient,
+      "Content-Type": "application/json"
     };
+
     const payload = {
-      cpu_cores: 1,
-      memory_gb: 0,
-      screen_width_px: 375,
-      screen_height_px: 600,
-      color_depth: 30,
-      scale_factor: 1,
-      browser_name: browserName,
-      device_type: "extension",
-      language: "en-US",
-      timezone: timezone,
+      data: registerPayload
     };
 
     try {
-      const response = await this.makeRequest("POST", "https://api.optimai.network/devices/register", { headers, data: payload });
+      const response = await this.makeRequest("POST", "https://api.optimai.network/devices/register-v2", { headers, data: payload });
       if (response?.status === 200) {
-        logMessage(this.currentNum, this.total, "Node registered successfully", "success");
-        return response.data.ws_auth_token;
+        const registerResponse = response.data?.data;
+        if (registerResponse) {
+          const registerResult = this.decodeResponseData(registerResponse);
+          if (registerResult && registerResult.device_id) {
+            logMessage(this.currentNum, this.total, "Node registered successfully", "success");
+            return true;
+          }
+        }
       }
-      return null;
+      return false;
     } catch (error: any) {
       logMessage(this.currentNum, this.total, `Error: ${error.message}`, "error");
-      return null;
+      return false;
     }
   }
 
+  async updateUptime() {
+    logMessage(this.currentNum, this.total, "Updating uptime...", "info");
+    if (!this.token) {
+      await this.getAccessToken();
+    }
 
-  async connectWebSocket(wsToken: string) {
-    logMessage(this.currentNum, this.total, "Connecting to WebSocket...", "info");
-    const url = `wss://ws.optimai.network/?token=${wsToken}`;
-    const wsOptions = this.proxy ? { agent: this.proxyManager.getProxyAgent(this.proxy, this.currentNum, this.total) } : undefined;
-    this.ws = new WebSocket(url, wsOptions);
-    this.wsToken = wsToken;
-    this.ws.onopen = () => {
-      logMessage(this.currentNum, this.total, `Node connected for ${this.currentNum}`, "success");
+
+    let uptimePayload = this.account.uptimePayload;
+    if (!uptimePayload) {
+      const payloads = await this.generatePayloadsFromToken();
+      if (!payloads) {
+        logMessage(this.currentNum, this.total, "Failed to generate payloads", "error");
+        return false;
+      }
+      uptimePayload = payloads.uptimePayload;
+    }
+
+    const headers = {
+      Authorization: `Bearer ${this.token}`,
+      "Content-Type": "application/json"
     };
 
-    this.ws.onmessage = (message) => {
-      logMessage(this.currentNum, this.total, `Message received: ${message.data}`, "info");
+    const payload = {
+      data: uptimePayload
     };
 
-    this.ws.onerror = (error) => {
-      logMessage(this.currentNum, this.total, `WebSocket error for account ${this.currentNum}: ${error.message}`, "error");
-      this.reconnectWebSocket();
-    };
-
-
-    this.ws.onclose = () => {
-      logMessage(this.currentNum, this.total, `WebSocket connection closed for account ${this.currentNum}`, "info");
-      this.reconnectWebSocket();
-    };
+    try {
+      const response = await this.makeRequest("POST", "https://api.optimai.network/uptime/online", { headers, data: payload });
+      if (response?.status === 200) {
+        const updatedResponse = response.data?.data;
+        if (updatedResponse) {
+          const updatedResult = this.decodeResponseData(updatedResponse);
+          if (updatedResult && updatedResult.reward) {
+            const reward = updatedResult.reward;
+            logMessage(this.currentNum, this.total, `Uptime updated successfully - Reward: +${reward} OPI`, "success");
+            return true;
+          }
+        }
+      }
+      return false;
+    } catch (error: any) {
+      logMessage(this.currentNum, this.total, `Error: ${error.message}`, "error");
+      return false;
+    }
   }
 
-  private reconnectWebSocket(): void {
-    setTimeout(() => {
-      if (this.wsToken) {
-        logMessage(this.currentNum, this.total, "Reconnecting WebSocket...", "info");
-        this.connectWebSocket(this.wsToken);
-      }
-    }, 5000);
+  async startUptimeLoop() {
+    while (true) {
+      logMessage(this.currentNum, this.total, "Waiting 10 minutes for uptime update...", "info");
+      await new Promise(resolve => setTimeout(resolve, 10 * 60 * 1000)); // 10 minutes
+      await this.updateUptime();
+    }
   }
 
   async getStatsAccount() {
@@ -183,44 +235,85 @@ export class optimAi {
     }
   }
 
-  async startStatsInterval() {
-    const fetchStats = async () => {
-      await this.getStatsAccount();
-      setTimeout(fetchStats, 60000);
-    };
+  async startCheckinLoop() {
+    while (true) {
+      const result = await this.checkinDaily();
+      if (result) {
+        logMessage(this.currentNum, this.total, "Check-in completed successfully", "success");
+      }
 
-    fetchStats();
+      await new Promise(resolve => setTimeout(resolve, 12 * 60 * 60 * 1000));
+    }
   }
 
 
   async checkinDaily() {
     logMessage(this.currentNum, this.total, "Checking in daily...", "info");
+    if (!this.token) {
+      await this.getAccessToken();
+    }
+
     const headers = {
-      Authorization: `Bearer ${this.token}`
+      Authorization: `Bearer ${this.token}`,
+      "Content-Type": "application/json"
     }
 
     try {
-      const response = await this.makeRequest("POST", 'https://api.optimai.network/daily-tasks/check-in', { headers: headers });
+      const response = await this.makeRequest("POST", 'https://api.optimai.network/daily-tasks/check-in', { headers: headers, data: {} });
       if (response?.status === 200) {
-        logMessage(this.currentNum, this.total, "Checked in successfully", "success");
+        const result = response.data;
+        if (result.message === "Check-in successful") {
+          const reward = result.reward;
+          logMessage(this.currentNum, this.total, `Check-in successful - Reward: +${reward} OPI`, "success");
+          return true;
+        } else if (result.message === "Check-in already completed for today") {
+          logMessage(this.currentNum, this.total, "Already checked in today", "info");
+          return true;
+        }
       }
-      return null;
+      return false;
     } catch (error: any) {
       logMessage(this.currentNum, this.total, `Error: ${error.message}`, "error");
-      return null;
+      return false;
     }
   }
 
-  async processRegisterNode() {
+  async processAccount() {
     try {
       await this.getAccessToken();
-      const detailNetwork = await this.getdetailNetwork();
-      const browser = BROWSERS[Math.floor(Math.random() * BROWSERS.length)];
-      const xclient = this.generator.generateXClientAuthentication(detailNetwork.timezone, browser);
-      const wsToken = await this.registerNode(detailNetwork.timezone, xclient, browser);
-      return wsToken;
+      const checkinPromise = this.startCheckinLoop();
+      const registerSuccess = await this.registerNode();
+      if (registerSuccess) {
+        const uptimePromise = this.startUptimeLoop();
+        await Promise.all([checkinPromise, uptimePromise]);
+      } else {
+        logMessage(this.currentNum, this.total, "Failed to register node", "error");
+        return false;
+      }
+
+      return true;
     } catch (error: any) {
       logMessage(this.currentNum, this.total, `Error: ${error.message}`, "error");
+      return false;
+    }
+  }
+
+  async generatePayloadsFromToken(): Promise<{ registerPayload: string; uptimePayload: string } | null> {
+    try {
+      if (!this.token) {
+        await this.getAccessToken();
+      }
+
+      const payloads = this.generator.generatePayloadsFromToken(this.account.refreshToken);
+      if (!payloads) {
+        logMessage(this.currentNum, this.total, "Failed to generate payloads", "error");
+        return null;
+      }
+
+      logMessage(this.currentNum, this.total, "Payloads generated successfully", "success");
+      return payloads;
+    } catch (error: any) {
+      logMessage(this.currentNum, this.total, `Error generating payloads: ${error.message}`, "error");
       return null;
     }
   }

@@ -17,7 +17,7 @@ Using Better Proxy
 1. Clone the repository:
 
    ```sh
-   git clone https://github.com/ahlulmukh/optimai-bot.git
+   git clone https://github.com/ahmuq/optimai-bot.git
    cd optimai-bot
    ```
 
@@ -36,32 +36,24 @@ Using Better Proxy
    http://user:pass@host:port
    ```
 
-4. Make file accounts, `cp accounts.json.example accounts.json` , edit and put your detail akun like this example`, just leave nodeToken, input only refreshToken
+4. Make file accounts, `cp accounts.json.example accounts.json`, edit and put your account details like this example:
 
    ```json
    [
      {
-       "refreshToken": "your_token",
-       "nodeToken": []
+       "refreshToken": "your_refresh_token"
      },
      {
-       "refreshToken": "your_token",
-       "nodeToken": []
-     },
-     {
-       "refreshToken": "your_token",
-       "nodeToken": []
-     },
-     {
-       "refreshToken": "your_token",
-       "nodeToken": []
+       "refreshToken": "your_refresh_token"
      }
    ]
    ```
 
-# How To Get Token
+   **Note**: `registerPayload` and `uptimePayload` will be generated automatically by the bot using the same algorithm as the Python setup. You only need to provide the `refreshToken`.
 
-<strong>Run code (OptimAI Console - [Ctrl + Shift + I])</strong>
+# How To Get Required Data
+
+**Get RefreshToken (OptimAI Console - [Ctrl + Shift + I])**
 
 ```js
 const token = localStorage.getItem("opai_refresh_token");
@@ -72,11 +64,16 @@ if (token) {
   textArea.select();
   document.execCommand("copy");
   document.body.removeChild(textArea);
-  console.log("%cToken copied to clipboard!", "color: green; font-size: 16px;");
+  console.log(
+    "%cRefresh Token copied to clipboard!",
+    "color: green; font-size: 16px;"
+  );
 } else {
-  console.error("Token not found in localStorage!");
+  console.error("Refresh Token not found in localStorage!");
 }
 ```
+
+**Payload Generation**: The bot will automatically generate `registerPayload` and `uptimePayload` using the same algorithm as the Python setup script. No manual extraction needed!
 
 ## Usage
 

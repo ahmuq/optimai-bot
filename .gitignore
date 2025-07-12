@@ -3,3 +3,4 @@ package-lock.json
 dist
 proxy.txt
 accounts.json
+dump.js
