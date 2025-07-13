@@ -25,32 +25,22 @@ async function main(): Promise<void> {
       logMessage(null, null, "Failed to load proxies, using default IP", "warning");
     }
 
-    for (let i = 0; i < accounts.length; i++) {
-      const account = accounts[i];
+    console.log(chalk.green(`Total accounts: ${accounts.length}`));
+    console.log(chalk.white("-".repeat(85)));
+    const accountPromises = accounts.map(async (account: any, index: number) => {
       try {
-        console.log(chalk.white("-".repeat(85)));
-        if (account.nodeToken.length === 0) {
-          const currentProxy = await proxyManager.getRandomProxy(i + 1, accounts.length);
-          const ex = new optimAi(account, currentProxy, i + 1, accounts.length);
-          const wsTokens = await ex.processRegisterNode();
-          if (wsTokens) {
-            account.nodeToken.push(wsTokens);
-          }
+        if (!account.refreshToken) {
+          logMessage(index + 1, accounts.length, "Missing required refreshToken", "error");
+          return;
         }
-
-        for (let j = 0; j < account.nodeToken.length; j++) {
-          const wsToken = account.nodeToken[j];
-          const currentProxy = await proxyManager.getRandomProxy(i * account.nodeToken.length + j, accounts.length * account.nodeToken.length);
-          const ex = new optimAi(account, currentProxy, i + 1, accounts.length);
-          await ex.startStatsInterval();
-          ex.connectWebSocket(wsToken);
-        }
+        const currentProxy = await proxyManager.getRandomProxy(index + 1, accounts.length);
+        const bot = new optimAi(account, currentProxy, index + 1, accounts.length);
+        await bot.processAccount();
       } catch (error: any) {
-        logMessage(null, null, `Failed to process account: ${error.message}`, "error");
+        logMessage(index + 1, accounts.length, `Failed to process account: ${error.message}`, "error");
       }
-    }
-
-    fs.writeFileSync("accounts.json", JSON.stringify(accounts, null, 4), "utf8");
+    });
+    await Promise.all(accountPromises);
   } catch (error: any) {
     logMessage(null, null, `Error: ${(error as any).message}`, "error");
   }

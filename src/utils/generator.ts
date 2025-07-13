@@ -1,55 +1,120 @@
-import { createHmac } from "crypto";
-
 export class Generator {
-    private client_secret: string = "D1A167BD1346DDF2357DA5A2F2F2F";
-
-    stableStringify(obj: any) {
-        const seen = new Set();
-        function sortObjectKeys(obj: any) {
-            if (typeof obj === "object" && obj !== null) {
-                const sortedObj: any = {};
-                Object.keys(obj)
-                    .sort()
-                    .forEach((key) => {
-                        sortedObj[key] = sortObjectKeys(obj[key]);
-                    });
-                return sortedObj;
-            }
-            return obj;
+    fibonacciMod(n: number): number {
+        let t = 0, i = 1;
+        for (let s = 0; s < n; s++) {
+            [t, i] = [i, t + i];
         }
-        return JSON.stringify(sortObjectKeys(obj));
+        return t % 20;
     }
 
-    generateXClientAuthentication(timezone: string, browserName: string) {
-        const payload = {
-            client_app_id: "TLG_MINI_APP_V1",
-            timestamp: Date.now(),
+    transformBs(text: string): string {
+        return text.split('').map((char, index) =>
+            String.fromCharCode(char.charCodeAt(0) + this.fibonacciMod(index))
+        ).join('');
+    }
+
+    transformRs(text: string): string {
+        return text.split('').map((char, index) =>
+            String.fromCharCode((char.charCodeAt(0) ^ index % 256) & 255)
+        ).join('');
+    }
+
+    transformSs(text: string): string {
+        const chars = [...text];
+        for (let i = 0; i < chars.length - 1; i += 2) {
+            [chars[i], chars[i + 1]] = [chars[i + 1], chars[i]];
+        }
+        return chars.join('');
+    }
+
+    generatePayload(data: any): string {
+        const jsonStr = JSON.stringify(data);
+        let transformed = this.transformBs(jsonStr);
+        transformed = this.transformRs(transformed);
+        transformed = this.transformSs(transformed);
+        const base64Result = Buffer.from(transformed, 'binary').toString('base64');
+        return base64Result;
+    }
+
+    createRegisterPayload(userId: string, timestamp: number): any {
+        return {
+            user_id: userId,
             device_info: {
-                browser_name: browserName,
-                color_depth: 30,
                 cpu_cores: 1,
+                memory_gb: 0,
+                screen_width_px: 375,
+                screen_height_px: 600,
+                color_depth: 30,
+                scale_factor: 1,
+                browser_name: "chrome",
                 device_type: "extension",
                 language: "en-US",
-                memory_gb: 0,
-                scale_factor: 1,
-                screen_height_px: 600,
-                screen_width_px: 375,
-                timezone: timezone,
+                timezone: Intl.DateTimeFormat().resolvedOptions().timeZone,
             },
+            browser_name: "chrome",
+            device_type: "extension",
+            timestamp: timestamp
         };
+    }
 
-        const jsonString = this.stableStringify(payload);
+    createUptimePayload(userId: string, deviceId: string, timestamp: number): any {
+        return {
+            duration: 600000,
+            user_id: userId,
+            device_id: deviceId,
+            device_type: "extension",
+            timestamp: timestamp
+        };
+    }
 
-        const signature = createHmac("sha256", this.client_secret)
-            .update(jsonString)
-            .digest("hex");
-        const tokenPayload = { ...payload, signature };
-        const base64Token = Buffer.from(JSON.stringify(tokenPayload)).toString(
-            "base64"
-        );
-        return base64Token
-            .replace(/\+/g, "-")
-            .replace(/\//g, "_")
-            .replace(/=+$/, "");
+    static extractUserIdFromToken(token: string): string {
+        try {
+            const parts = token.split('.');
+            if (parts.length >= 2) {
+                const payload = JSON.parse(Buffer.from(parts[1], 'base64').toString());
+                return payload.sub || payload.user_id || payload.id || "default_user";
+            }
+        } catch (error: any) {
+            console.log(`Could not extract user_id from token: ${error.message}`);
+        }
+        return "default_user";
+    }
+
+    static generatePayloadsFromToken(refreshToken: string): { registerPayload: string; uptimePayload: string } | null {
+        try {
+            const generator = new Generator();
+            const userId = Generator.extractUserIdFromToken(refreshToken);
+            const deviceId = `${userId}-device-${Date.now()}`;
+            const timestamp = Date.now();
+            const deviceInfo = {
+                cpu_cores: 1,
+                memory_gb: 0,
+                screen_width_px: 375,
+                screen_height_px: 600,
+                color_depth: 30,
+                scale_factor: 1,
+                browser_name: "chrome",
+                device_type: "extension",
+                language: "en-US",
+                timezone: Intl.DateTimeFormat().resolvedOptions().timeZone,
+            };
+
+            const registerData = {
+                user_id: userId,
+                device_info: deviceInfo,
+                browser_name: deviceInfo.browser_name,
+                device_type: deviceInfo.device_type,
+                timestamp: timestamp
+            };
+
+            const uptimeData = generator.createUptimePayload(userId, deviceId, timestamp);
+            const registerPayload = generator.generatePayload(registerData);
+            const uptimePayload = generator.generatePayload(uptimeData);
+
+            return { registerPayload, uptimePayload };
+        } catch (error: any) {
+            console.log(`Error generating payloads: ${error.message}`);
+            return null;
+        }
     }
 }
