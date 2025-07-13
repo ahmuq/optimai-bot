@@ -1,3 +1,4 @@
+
 export class Generator {
     fibonacciMod(n: number): number {
         let t = 0, i = 1;
@@ -47,8 +48,8 @@ export class Generator {
                 scale_factor: 1,
                 browser_name: "chrome",
                 device_type: "extension",
-                language: "id-ID",
-                timezone: "Asia/Jakarta"
+                language: "en-US",
+                timezone: Intl.DateTimeFormat().resolvedOptions().timeZone,
             },
             browser_name: "chrome",
             device_type: "extension",
@@ -61,12 +62,12 @@ export class Generator {
             duration: 600000,
             user_id: userId,
             device_id: deviceId,
-            device_type: "telegram",
+            device_type: "extension",
             timestamp: timestamp
         };
     }
 
-    extractUserIdFromToken(token: string): string {
+    static extractUserIdFromToken(token: string): string {
         try {
             const parts = token.split('.');
             if (parts.length >= 2) {
@@ -79,16 +80,16 @@ export class Generator {
         return "default_user";
     }
 
-    generatePayloadsFromToken(refreshToken: string): { registerPayload: string; uptimePayload: string } | null {
+    static generatePayloadsFromToken(refreshToken: string): { registerPayload: string; uptimePayload: string } | null {
         try {
-
-            const userId = this.extractUserIdFromToken(refreshToken);
+            const generator = new Generator();
+            const userId = Generator.extractUserIdFromToken(refreshToken);
             const deviceId = `${userId}-device-${Date.now()}`;
             const timestamp = Date.now();
-            const registerData = this.createRegisterPayload(userId, timestamp);
-            const uptimeData = this.createUptimePayload(userId, deviceId, timestamp);
-            const registerPayload = this.generatePayload(registerData);
-            const uptimePayload = this.generatePayload(uptimeData);
+            const registerData = generator.createRegisterPayload(userId, timestamp);
+            const uptimeData = generator.createUptimePayload(userId, deviceId, timestamp);
+            const registerPayload = generator.generatePayload(registerData);
+            const uptimePayload = generator.generatePayload(uptimeData);
             return { registerPayload, uptimePayload };
         } catch (error: any) {
             console.log(`Error generating payloads: ${error.message}`);
