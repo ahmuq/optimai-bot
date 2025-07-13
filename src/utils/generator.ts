@@ -1,4 +1,3 @@
-
 export class Generator {
     fibonacciMod(n: number): number {
         let t = 0, i = 1;
@@ -16,12 +15,12 @@ export class Generator {
 
     transformRs(text: string): string {
         return text.split('').map((char, index) =>
-            String.fromCharCode((char.charCodeAt(0) ^ (index % 256)) & 255)
+            String.fromCharCode((char.charCodeAt(0) ^ index % 256) & 255)
         ).join('');
     }
 
     transformSs(text: string): string {
-        const chars = text.split('');
+        const chars = [...text];
         for (let i = 0; i < chars.length - 1; i += 2) {
             [chars[i], chars[i + 1]] = [chars[i + 1], chars[i]];
         }
@@ -33,7 +32,8 @@ export class Generator {
         let transformed = this.transformBs(jsonStr);
         transformed = this.transformRs(transformed);
         transformed = this.transformSs(transformed);
-        return Buffer.from(transformed).toString('base64');
+        const base64Result = Buffer.from(transformed, 'binary').toString('base64');
+        return base64Result;
     }
 
     createRegisterPayload(userId: string, timestamp: number): any {
@@ -86,10 +86,31 @@ export class Generator {
             const userId = Generator.extractUserIdFromToken(refreshToken);
             const deviceId = `${userId}-device-${Date.now()}`;
             const timestamp = Date.now();
-            const registerData = generator.createRegisterPayload(userId, timestamp);
+            const deviceInfo = {
+                cpu_cores: 1,
+                memory_gb: 0,
+                screen_width_px: 375,
+                screen_height_px: 600,
+                color_depth: 30,
+                scale_factor: 1,
+                browser_name: "chrome",
+                device_type: "extension",
+                language: "en-US",
+                timezone: Intl.DateTimeFormat().resolvedOptions().timeZone,
+            };
+
+            const registerData = {
+                user_id: userId,
+                device_info: deviceInfo,
+                browser_name: deviceInfo.browser_name,
+                device_type: deviceInfo.device_type,
+                timestamp: timestamp
+            };
+
             const uptimeData = generator.createUptimePayload(userId, deviceId, timestamp);
             const registerPayload = generator.generatePayload(registerData);
             const uptimePayload = generator.generatePayload(uptimeData);
+
             return { registerPayload, uptimePayload };
         } catch (error: any) {
             console.log(`Error generating payloads: ${error.message}`);

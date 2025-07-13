@@ -1,10 +1,8 @@
 import axios, { AxiosResponse } from "axios";
 import chalk from "chalk";
-import UserAgent from 'user-agents';
 import { Generator } from "../utils/generator";
 import { logMessage } from "../utils/logger";
 import { ProxyManager } from "./proxy";
-const userAgent = new UserAgent();
 
 export class optimAi {
     private proxyManager: ProxyManager;
@@ -29,12 +27,9 @@ export class optimAi {
                 "Content-Type": "application/json"
             }
         };
-    }
-
-    async makeRequest(method: string, url: string, config: any = {}, retries: number = 3): Promise<AxiosResponse | null> {
+    } async makeRequest(method: string, url: string, config: any = {}, retries: number = 3): Promise<AxiosResponse | null> {
         for (let i = 0; i < retries; i++) {
             try {
-
                 const response = await axios({
                     method,
                     url,
@@ -47,8 +42,53 @@ export class optimAi {
                     logMessage(this.currentNum, this.total, `Request failed: ${(error as any).message}`, "error");
                     return null;
                 }
-                logMessage(this.currentNum, this.total, `Retrying... (${i + 1}/${retries})`, "error");
-                await new Promise((resolve) => setTimeout(resolve, 2000));
+
+                const isRateLimit = error.response?.status === 429;
+                const retryDelay = isRateLimit ? Math.max(2000, 2000 + (i * 1000)) : 2000;
+
+                logMessage(this.currentNum, this.total, `Retrying... (${i + 1}/${retries})${isRateLimit ? ' - Rate limited' : ''}`, "error");
+                await new Promise((resolve) => setTimeout(resolve, retryDelay));
+            }
+        }
+        return null;
+    }
+
+    async makeRequestWithHighRetry(method: string, url: string, config: any = {}): Promise<AxiosResponse | null> {
+        const maxRetries = 50;
+        const minTimeout = 2000;
+        let retryCount = 0;
+
+        while (retryCount < maxRetries) {
+            try {
+                const response = await axios({
+                    method,
+                    url,
+                    ...this.axiosConfig,
+                    ...config,
+                });
+                return response;
+            } catch (error: any) {
+                retryCount++;
+
+                const isRateLimit = error.response?.status === 429;
+                const statusCode = error.response?.status || 'unknown';
+                const errorMessage = error.response?.data?.message || error.message;
+
+                logMessage(this.currentNum, this.total, `Request failed with status ${statusCode}: ${errorMessage}`, "error");
+
+                const shouldContinueRetry = retryCount < maxRetries;
+
+                if (!shouldContinueRetry) {
+                    logMessage(this.currentNum, this.total, `Request failed after ${maxRetries} retries: ${error.message}`, "error");
+                    return null;
+                }
+
+                const retryDelay = isRateLimit ?
+                    Math.max(minTimeout, minTimeout * Math.pow(2, Math.min(retryCount, 5))) :
+                    minTimeout + (retryCount * 500);
+
+                logMessage(this.currentNum, this.total, `Retrying... (${retryCount}/${maxRetries})${isRateLimit ? ' - Rate limited' : ''}`, "error");
+                await new Promise((resolve) => setTimeout(resolve, retryDelay));
             }
         }
         return null;
@@ -65,15 +105,17 @@ export class optimAi {
 
     decodeResponseData(data: string): any {
         try {
+
             const decoded = Buffer.from(data, 'base64').toString('utf-8');
             const filtered = decoded.split('').filter((char, index) => (index + 1) % 5 !== 0).join('');
             const reversedStr = filtered.split('').reverse().join('');
             const a = 7;
 
             let result = '';
-            for (let i = 0; i < reversedStr.length; i += 2) {
-                const hexValue = reversedStr.substring(i, i + 2);
-                const charCode = parseInt(hexValue, 16) ^ (a + Math.floor(i / 2));
+            const hexPairs = reversedStr.match(/.{1,2}/g) || [];
+            for (let i = 0; i < hexPairs.length; i++) {
+                const hexValue = hexPairs[i];
+                const charCode = parseInt(hexValue, 16) ^ (a + i);
                 result += String.fromCharCode(charCode);
             }
 
@@ -109,7 +151,6 @@ export class optimAi {
             await this.getAccessToken();
         }
 
-
         let registerPayload = this.account.registerPayload;
         if (!registerPayload) {
             const payloads = await this.generatePayloadsFromToken();
@@ -120,30 +161,43 @@ export class optimAi {
             registerPayload = payloads.registerPayload;
         }
 
-        const headers = {
-            Authorization: `Bearer ${this.token}`,
-            "Content-Type": "application/json"
-        };
-
         const payload = {
             data: registerPayload
         };
 
+        logMessage(this.currentNum, this.total, `Sending payload with length: ${registerPayload.length}`, "info");
+        const requestConfig = {
+            data: payload,
+            headers: {
+                "Content-Type": "application/json",
+                "Authorization": `Bearer ${this.token}`
+            }
+        };
+
         try {
-            const response = await this.makeRequest("POST", "https://api.optimai.network/devices/register-v2", { headers, data: payload });
+            const response = await this.makeRequestWithHighRetry("POST", "https://api.optimai.network/devices/register-v2", requestConfig);
             if (response?.status === 200) {
+                logMessage(this.currentNum, this.total, `Register response received: ${JSON.stringify(response.data)}`, "info");
                 const registerResponse = response.data?.data;
                 if (registerResponse) {
+                    logMessage(this.currentNum, this.total, `Attempting to decode response data...`, "info");
                     const registerResult = this.decodeResponseData(registerResponse);
+                    logMessage(this.currentNum, this.total, `Decoded result: ${JSON.stringify(registerResult)}`, "info");
                     if (registerResult && registerResult.device_id) {
                         logMessage(this.currentNum, this.total, "Node registered successfully", "success");
                         return true;
+                    } else {
+                        logMessage(this.currentNum, this.total, "No device_id found in decoded response", "error");
                     }
+                } else {
+                    logMessage(this.currentNum, this.total, "No data field in response", "error");
                 }
+            } else {
+                logMessage(this.currentNum, this.total, `Register failed with status: ${response?.status}`, "error");
             }
             return false;
         } catch (error: any) {
-            logMessage(this.currentNum, this.total, `Error: ${error.message}`, "error");
+            logMessage(this.currentNum, this.total, `Failed to register node: ${error.message}`, "error");
             return false;
         }
     }
@@ -197,7 +251,7 @@ export class optimAi {
     async startUptimeLoop() {
         while (true) {
             logMessage(this.currentNum, this.total, "Waiting 10 minutes for uptime update...", "info");
-            await new Promise(resolve => setTimeout(resolve, 10 * 60 * 1000)); // 10 minutes
+            await new Promise(resolve => setTimeout(resolve, 10 * 60 * 1000));
             await this.updateUptime();
         }
     }
@@ -274,6 +328,10 @@ export class optimAi {
     async processAccount() {
         try {
             await this.getAccessToken();
+            const delay = this.getRandomDelay(3000, 10000);
+            logMessage(this.currentNum, this.total, `Waiting ${Math.floor(delay / 1000)} seconds before registering node...`, "info");
+            await new Promise(resolve => setTimeout(resolve, delay));
+
             const checkinPromise = this.startCheckinLoop();
             const registerSuccess = await this.registerNode();
             if (registerSuccess) {
@@ -296,8 +354,7 @@ export class optimAi {
             if (!this.token) {
                 await this.getAccessToken();
             }
-
-            const payloads = Generator.generatePayloadsFromToken(this.account.refreshToken);
+            const payloads = Generator.generatePayloadsFromToken(this.token!);
             if (!payloads) {
                 logMessage(this.currentNum, this.total, "Failed to generate payloads", "error");
                 return null;
@@ -309,6 +366,10 @@ export class optimAi {
             logMessage(this.currentNum, this.total, `Error generating payloads: ${error.message}`, "error");
             return null;
         }
+    }
+
+    private getRandomDelay(min: number, max: number): number {
+        return Math.floor(Math.random() * (max - min + 1)) + min;
     }
 
 }
